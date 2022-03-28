@@ -6,20 +6,24 @@ Created on Wed Feb  9 11:33:31 2022
 @author: katie
 """
 
+
 import numpy as np
 import math
 from skimage import io, color
+import match as Match
+import matplotlib.pyplot as plt
 
-
-sigma_d = 0
-sigma_s = 0
-lambda_ = 0
-V_max = 5
-m = 0
-M = (m,m)
-p_coordinate = (1,2)
-theta = 0
-
+# =============================================================================
+# sigma_d = 0
+# sigma_s = 0
+# lambda_ = 0
+# V_max = 5
+# m = 0
+# M = (m,m)
+# p_coordinate = (1,2)
+# theta = 0
+# 
+# =============================================================================
 """
 t should iterate through all pixels in a given window W(p)
 
@@ -28,15 +32,23 @@ All pixels should be of the shape (3,)
 p
 
 """
-def R_3(t, gamma, p, image):
-    W = create_coordinate_list(p)
+def R_3(gamma, p, image,sigma_s,sigma_d, channel,width):
+    window = W(p,width)
     inner_term = []
-    for t in W:
-        inner_term.append(w(t)*K(t))
-    inner = inner_term/Z
-    omega = omega(p)
-    Z = Z(omega)
-    R_3 = gamma * (K(t) - inner)
+    omega_ = []
+    for t in window:
+        if Match.inRect(t,image.shape):
+            try:
+                a = w(p,t,sigma_d, sigma_s,channel,image)
+                b = K(t,channel,image)
+                omega_.append(a)
+                inner_term.append(a*b)
+            except:
+                pass
+    #omega_ = omega(p,image, width,sigma_d, sigma_s,channel)
+    Z_ = np.mean(omega_)
+    inner = inner_term/Z_
+    R_3 = K(p,channel,image) - inner
     return R_3
 """
 color: may be 0, 1, or 2 (red = 0, green = 1, blue = 2)
@@ -51,7 +63,7 @@ def create_m_list(m):
             m_list.append([i,j])
     return m_list
 
-def create_coordinate_list(p_coordinate):
+def create_coordinate_list(p_coordinate,m):
     m_list = create_m_list(m)
     
     m_p_list = []
@@ -59,85 +71,92 @@ def create_coordinate_list(p_coordinate):
         m_p_list.append(list( map(add, m_list[i], p_coordinate) ))
     return(m_p_list)
             
-def omega(p, p_coordinate,image):
-    coordinates_in_M = create_coordinate_list(p_coordinate)
+def omega(p_coordinate,image,width,sigma_d, sigma_s,channel):
+    coordinates_in_M = W(p_coordinate, width)
 
     omega = []
-    for i in coordinates_in_M:
-        t = image[coordinates_in_M[0],coordinates_in_M[1],:]
-        w = w(p, t)
-        omega.append(w)
+    for t in coordinates_in_M:
+        if Match.inRect(t,image.shape):
+            try:
+                w_ = w(p_coordinate, t,sigma_d, sigma_s,channel,image)*K(t,channel,image)
+                omega.append(w_)
+            except:
+                pass
     return omega
 
-def v(p, p_coordinate, image):
-    coordinates_in_M = create_coordinate_list(p_coordinate)
-    
-    v = []
-    for i in coordinates_in_M:
-        t = image[coordinates_in_M[0],coordinates_in_M[1],:]
-        R_3 = R_3(t)
-        v.append(R_3)
-    return v
+ 
 
 def Z(omega):
     Z = np.mean(omega)
     return Z
     
-def K(t, color):
-    K = math.log((t[color])/((t[0]*t[1]*t[1])**(1/3)))
+def K(t, color,image):
+    term = (image[t[0],t[1],color])/((image[t[0],t[1],0]*image[t[0],t[1],1]*image[t[0],t[1],1])**(1/3))
+    if term >= 0:
+        K = math.log(term,10)
+    else:
+        K = 0
     return K
 
 def I(t):
     mean = np.mean(t)
     return mean
 
-def w(p, t):
-    I_p = I(p)
-    I_t = I(t)
-    w = math.exp(-((np.linalg.norm(p-t))/(2*(sigma_d**2)))-((np.linalg.norm(I_p-I_t))/(2*(sigma_s**2))))
+def w(p, t, sigma_d, sigma_s,channel,image):
+    p = np.asarray(p)
+    t = np.asarray(t)
+    I_p = I(image[p[0],p[1],:])
+    I_t = I(image[t[0],t[1],:])
+    term1 = -((np.linalg.norm( np.array([p[0],p[1]])-np.array([t[0],t[1]]) ))**2)
+    term2= -((np.linalg.norm( I_p + I_t))**2)
+    w = math.exp((term1+term2)/(2*(sigma_d**2)))
     return w
 
-def ANCC_log(p_L, p_R, image_L, image_R, channel,gamma=gamma):
-    list_of_coordinates_L = create_coordinate_list(p_L)
-    list_of_coordinates_R = create_coordinate_list(p_R)
+def ANCC(p_L, p_R, image_L, image_R, channel,gamma,width,sigma_d, sigma_s):
+    list_of_coordinates_L = W(p_L,width)
+    list_of_coordinates_R = W(p_R,width)
     numerator = []
     denominator_1 = []
     denominator_2 = []
-    for i in len(list_of_coordinates):
-        w_L = w(image_L[p_L], image_L[list_of_coordinates_L[i],channel])
-        w_R = w(image_R[p_R], image_R[list_of_coordinates_R[i], channel)
-        R_3_L = R_3(list_of_coordinates_L[i], gamma, p_L, image_L)
-        R_3_R = R_3(list_of_coordinates_R[i], gamma, p_R, image_R)
-        term_1 = w_L*w_R*R_3_L*R_3_R
-        numerator.append(term_1)
-        left = np.sqrt((np.norm(w_L*R_3_L))**2)
-        right = np.sqrt((np.norm(w_L*R_3_R))**2)
-        denominator_1.append(left)
-        denominator_2.append(right)
+    R_3_L = R_3(gamma, p_L, image_L, sigma_s,sigma_d, channel,width)
+    R_3_R = R_3(gamma, p_R, image_R, sigma_s,sigma_d, channel,width)
+    for i in range(0,len(list_of_coordinates_L)):
+        if Match.inRect(list_of_coordinates_L[i], image_L.shape) and Match.inRect(list_of_coordinates_R[i], image_R.shape):
+            w_L = w(p_L, list_of_coordinates_L[i],sigma_d, sigma_s,channel,image_L)
+            w_R = w(p_R, list_of_coordinates_R[i], sigma_d, sigma_s, channel,image_R)
+            term_1 = w_L*w_R*R_3_L*R_3_R
+            numerator.append(term_1)
+            left = np.sqrt((np.linalg.norm(w_L*R_3_L))**2)
+            right = np.sqrt((np.linalg.norm(w_L*R_3_R))**2)
+            denominator_1.append(left)
+            denominator_2.append(right)
     numerator = np.sum(numerator)
     denominator_1 = np.sqrt(np.sum(denominator_1))
     denominator_2 = np.sqrt(np.sum(denominator_2))
     denominator = denominator_1 * denominator_2
-    f_p = p_R[1] - p_L[1]
-    return f_p, numerator/denominator
-
-def D(p_L, p_R, image_L, image_R, channel,gamma=gamma, theta=theta):
+    return numerator/denominator
+ 
+def D(p_L, p_R, image_L, image_R, gamma, theta,width,sigma_d, sigma_s):
     # 0 = red, 1 = green, 2 = blue
     color_channels = [0,1,2]
     log_color_channels = [0,1,2]
     cielab_image_L = color.rgb2lab(image_L)
     cielab_image_R = color.rgb2lab(image_R)
     color_ANCC = []
-    log_color_ANCC = []
-    for i in color_channels:
-        color_ANCC.append(ANCC(p_L, p_R, image_L, image_R, channel = i,gamma=gamma))
+    log_color_ANCC = [0]
+    #for i in color_channels:
+    #    color_ANCC.append(ANCC(p_L, p_R, image_L, image_R, channel = i,gamma=gamma, width=width,sigma_d = sigma_d, sigma_s = sigma_s))
     for i in log_color_channels:
-        log_color_ANCC.append(ANCC_log(p_L, p_R, cielab_image_L, cielab_image_R, channel = i,gamma=gamma))
+        log_color_ANCC.append(ANCC(p_L, p_R, cielab_image_L, cielab_image_R, channel = i,gamma=gamma,width=width,sigma_d = sigma_d, sigma_s = sigma_s))
     D = 1 - ((theta*(np.sum(color_ANCC)))+(1-theta)*(np.sum(log_color_ANCC)))
-    return D
+    if math.isnan(D) == False:
+        return D
+    else:
+        D = 0
+        return D
 
-def V_pq(f_p, f_q, lambda_, V_max=5)
-    return lambda_ * np.maximum((np.norm(f_p, f_q)**2), V_max)
+def V_pq(f_p, f_q, lambda_ancc, V_max=5):
+    return lambda_ancc * np.maximum((np.linalg.norm((f_p, f_q))**2), V_max)
 
 def N(p):
     list_of_terms_1 = [-1,0,1]
@@ -148,28 +167,34 @@ def N(p):
             N.append(list_of_terms.append([p[0]+i,p[1]+j]))
     return N
 
-def W(p):
-    return []
+def W(p,m):
+    window_indices = []
+    for i in range(-m,m):
+        for j in range(-m,m):
+            window_indices.append([p[0]+i,p[1]+j])
+    return window_indices
 
-def E(disparities): #assume disparities is some matrix of f_p's
-    
-    N = N(p)
-    V= []
-    D = []
-    
-    for f_p in disparities:
-        D.append(D()
-        for q in N:
-            f_q = disparities[q]
-            V.append(V_pq(f_p, f_q, lambda_, V_max=5))
-    E = 
-        
+#def E_f_p(p_L, p_R, imageLeft, imageRight, parameters): #assume disparities is some matrix of f_p's
+#    imageLeft_LAB = color.rgb2lab(imageLeft)
+#    imageLeft_Right = color.rgb2lab(imageRight)
+#    N = N(p)
+#    V= []
+#    D = []
+#    
+#    f_p = d2 - d1 
+#        D.append(D(p_L,p_R, image_L, image_R, parameters.gamma, parameters.theta))
+#        for dq in N:
+#            f_q = dq - d1
+#            V.append(V_pq(f_p, f_q, parameters.lambda_ancc, parameters.V_max))
+#    E = np.sum(D) + np.sum(V)
+#    return E
+#        
     
 def match(file1, file2, color, dispMin, dispMax):
     # load two images
     imgLeft = cv2.imread(file1)
     imgRight = cv2.imread(file2)
-
+    
     # Default parameters
     K = -1
     lambda_ = -1
@@ -191,17 +216,4 @@ def match(file1, file2, color, dispMin, dispMax):
     disparities = m.kolmogorov_zabih()
     return disparities
     
-def find_map(image_L, image_R, dispMin, dispMax):
-    disparities = match(image_L, image_R, dispMin, dispMax)
-    energy = E(disparities)
-    
-    return disparities, energy
-
-
-        
-
-#def obtain_ANCC_info(p_L, p_R, image_L, image_R):
-    
-    
-#def ANCC(p):
     
