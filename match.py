@@ -10,6 +10,7 @@ import energy
 import numpy as np
 import preprocessing
 import cv2
+import ancc
 np.seterr(over='ignore')
 
 
@@ -105,8 +106,10 @@ def dist_interval(v, mi, ma):
     return 0
 
 
+
 class Parameters:
-    def __init__(self, is_L2, denominator, edgeThresh, lambda1, lambda2, K, maxIter):
+    def __init__(self, is_L2, denominator, edgeThresh, lambda1, lambda2, K, maxIter,
+                 sigma_d, sigma_s,lambda_ancc, V_max, width, theta, gamma):
         self.maxIter = maxIter
         self.K = K
         self.lambda2 = lambda2
@@ -114,6 +117,13 @@ class Parameters:
         self.edgeThresh = edgeThresh
         self.L2 = is_L2
         self.denominator = denominator
+        self.sigma_d = sigma_d
+        self.sigma_s = sigma_s
+        self.lambda_ancc = lambda_ancc
+        self.V_max = V_max
+        self.width = width
+        self.theta = theta
+        self.gamma= gamma
 
 
 class CONST(object):
@@ -414,8 +424,55 @@ class Match:
             return self.smoothness_penalty_color(coordP1, coordP2, d)
         else:
             return self.smoothness_penalty_gray(coordP1, coordP2, d)
+        
+    def ComputeEnergy(self, ):
+        """
+        Compute current energy, we use this function only for sanity check
+        :return: current energy
+        """
+        E = 0
+        V= []
+        D = []
+        for index, _ in np.ndenumerate(self.posIter):
+            disparity = self.disparityL[index]
+            window_around_index = ancc.W(index, self.params.width)
+            q_f_p = (index[0], index[1]+ disparity)
+            if inRect(q_f_p,self.imSizeR):
+                D.append(ancc.D(index,q_f_p,self.imgColorL, self.imgColorR, self.params.gamma, self.params.theta,self.params.width,self.params.sigma_d, self.params.sigma_s))
 
-    def ComputeEnergy(self):
+                for n in window_around_index:
+
+                    if inRect(n,self.disparityL.shape):
+                        try:
+                            V.append(ancc.V_pq(disparity, self.disparityL[n], self.params.lambda_ancc, self.params.V_max))
+                        except:
+                            pass
+            d1 = self.disparityL[index]
+            
+            E += np.sum(D)
+            
+            #print(E)
+            E += np.sum(V)
+            #print(E)
+            
+            if d1 != self.OCCLUDED.val:
+                E += self.data_occlusion_penalty(index, (index[0], index[1] + d1))
+
+            for neighbor in NEIGHBORS:
+                coordP2 = coord_add(index, neighbor)
+                if inRect(coordP2, self.imSizeL):
+                    d2 = self.disparityL[coordP2]
+                    if d1 == d2:  # smoothness satisfied
+                        continue
+                    if d1 != self.OCCLUDED.val and inRect((coordP2[0], coordP2[1] + d1), self.imSizeR):
+                        E += self.smoothness_penalty(index, coordP2, d1)
+                    if d2 != self.OCCLUDED.val and inRect((index[0], index[1] + d2), self.imSizeR):
+                        E += self.smoothness_penalty(index, coordP2, d2)
+
+
+        return E
+
+    def ComputeEnergy_old(self):
         """
         Compute current energy, we use this function only for sanity check
         :return: current energy
